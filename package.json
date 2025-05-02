@@ -1,12 +1,15 @@
 {
   "name": "recruitment-screening-system",
   "version": "0.1.0",
+  "type": "module",
   "private": true,
   "scripts": {
+    "test-workflow": "ts-node --esm src/mastra/index.ts",
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "clean": "rd /s /q .next"
   },
   "dependencies": {
     "@ai-sdk/openai": "^1.3.21",

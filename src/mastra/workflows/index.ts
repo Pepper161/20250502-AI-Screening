@@ -1,185 +1,251 @@
-import { openai } from '@ai-sdk/openai';
-import { Agent } from '@mastra/core/agent';
 import { Step, Workflow } from '@mastra/core/workflows';
 import { z } from 'zod';
+import { recruiterAgent } from '../agents';
 
-const llm = openai('gpt-4o');
-
-const agent = new Agent({
-  name: 'Weather Agent',
-  model: llm,
-  instructions: `
-        You are a local activities and travel expert who excels at weather-based planning. Analyze the weather data and provide practical activity recommendations.
-
-        For each day in the forecast, structure your response exactly as follows:
-
-        📅 [Day, Month Date, Year]
-        ═══════════════════════════
-
-        🌡️ WEATHER SUMMARY
-        • Conditions: [brief description]
-        • Temperature: [X°C/Y°F to A°C/B°F]
-        • Precipitation: [X% chance]
-
-        🌅 MORNING ACTIVITIES
-        Outdoor:
-        • [Activity Name] - [Brief description including specific location/route]
-          Best timing: [specific time range]
-          Note: [relevant weather consideration]
-
-        🌞 AFTERNOON ACTIVITIES
-        Outdoor:
-        • [Activity Name] - [Brief description including specific location/route]
-          Best timing: [specific time range]
-          Note: [relevant weather consideration]
-
-        🏠 INDOOR ALTERNATIVES
-        • [Activity Name] - [Brief description including specific venue]
-          Ideal for: [weather condition that would trigger this alternative]
-
-        ⚠️ SPECIAL CONSIDERATIONS
-        • [Any relevant weather warnings, UV index, wind conditions, etc.]
-
-        Guidelines:
-        - Suggest 2-3 time-specific outdoor activities per day
-        - Include 1-2 indoor backup options
-        - For precipitation >50%, lead with indoor activities
-        - All activities must be specific to the location
-        - Include specific venues, trails, or locations
-        - Consider activity intensity based on temperature
-        - Keep descriptions concise but informative
-
-        Maintain this exact formatting for consistency, using the emoji and section headers as shown.
-      `,
-});
-
-const forecastSchema = z.array(
-  z.object({
-    date: z.string(),
-    maxTemp: z.number(),
-    minTemp: z.number(),
-    precipitationChance: z.number(),
-    condition: z.string(),
-    location: z.string(),
-  }),
-);
-
-const fetchWeather = new Step({
-  id: 'fetch-weather',
-  description: 'Fetches weather forecast for a given city',
+// 候補者情報を収集するステップ
+const gatherCandidateInfo = new Step({
+  id: 'gatherCandidateInfo',
   inputSchema: z.object({
-    city: z.string().describe('The city to get the weather for'),
+    resumeText: z.string(),
   }),
-  outputSchema: forecastSchema,
+  outputSchema: z.object({
+    candidateName: z.string(),
+    isTechnical: z.boolean(),
+    specialty: z.string(),
+    industryType: z.string(),
+    previousJob: z.string(),
+    hometown: z.string(),
+    education: z.string(),
+    resumeText: z.string(),
+  }),
   execute: async ({ context }) => {
-    const triggerData = context?.getStepResult<{ city: string }>('trigger');
+    const resumeText = context?.getStepResult<{ resumeText: string }>('trigger')?.resumeText || '';
+    const prompt = `Extract the following details from the resume text:
+1. Candidate name
+2. Whether they are technical (true/false)
+3. Their specialty or expertise
+4. Industry type they work in (e.g., construction, IT, general office work)
+5. Previous job title
+6. Hometown
+7. Education background
+"${resumeText}"`;
 
-    if (!triggerData) {
-      throw new Error('Trigger data not found');
-    }
+    const res = await recruiterAgent.generate(prompt, {
+      output: z.object({
+        candidateName: z.string(),
+        isTechnical: z.boolean(),
+        specialty: z.string(),
+        industryType: z.string(),
+        previousJob: z.string(),
+        hometown: z.string(),
+        education: z.string(),
+        resumeText: z.string(),
+      }),
+    });
 
-    const geocodingUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(triggerData.city)}&count=1`;
-    const geocodingResponse = await fetch(geocodingUrl);
-    const geocodingData = (await geocodingResponse.json()) as {
-      results: { latitude: number; longitude: number; name: string }[];
-    };
-
-    if (!geocodingData.results?.[0]) {
-      throw new Error(`Location '${triggerData.city}' not found`);
-    }
-
-    const { latitude, longitude, name } = geocodingData.results[0];
-
-    const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_mean,weathercode&timezone=auto`;
-    const response = await fetch(weatherUrl);
-    const data = (await response.json()) as {
-      daily: {
-        time: string[];
-        temperature_2m_max: number[];
-        temperature_2m_min: number[];
-        precipitation_probability_mean: number[];
-        weathercode: number[];
-      };
-    };
-
-    const forecast = data.daily.time.map((date: string, index: number) => ({
-      date,
-      maxTemp: data.daily.temperature_2m_max[index],
-      minTemp: data.daily.temperature_2m_min[index],
-      precipitationChance: data.daily.precipitation_probability_mean[index],
-      condition: getWeatherCondition(data.daily.weathercode[index]!),
-      location: name,
-    }));
-
-    return forecast;
+    return res.object;
   },
 });
 
-const planActivities = new Step({
-  id: 'plan-activities',
-  description: 'Suggests activities based on weather conditions',
-  execute: async ({ context, mastra }) => {
-    const forecast = context?.getStepResult(fetchWeather);
-
-    if (!forecast || forecast.length === 0) {
-      throw new Error('Forecast data not found');
-    }
-
-    const prompt = `Based on the following weather forecast for ${forecast[0]?.location}, suggest appropriate activities:
-      ${JSON.stringify(forecast, null, 2)}
-      `;
-
-    const response = await agent.stream([
-      {
-        role: 'user',
-        content: prompt,
-      },
-    ]);
-
-    let activitiesText = '';
-
-    for await (const chunk of response.textStream) {
-      process.stdout.write(chunk);
-      activitiesText += chunk;
-    }
-
-    return {
-      activities: activitiesText,
-    };
-  },
-});
-
-function getWeatherCondition(code: number): string {
-  const conditions: Record<number, string> = {
-    0: 'Clear sky',
-    1: 'Mainly clear',
-    2: 'Partly cloudy',
-    3: 'Overcast',
-    45: 'Foggy',
-    48: 'Depositing rime fog',
-    51: 'Light drizzle',
-    53: 'Moderate drizzle',
-    55: 'Dense drizzle',
-    61: 'Slight rain',
-    63: 'Moderate rain',
-    65: 'Heavy rain',
-    71: 'Slight snow fall',
-    73: 'Moderate snow fall',
-    75: 'Heavy snow fall',
-    95: 'Thunderstorm',
-  };
-  return conditions[code] || 'Unknown';
-}
-
-const weatherWorkflow = new Workflow({
-  name: 'weather-workflow',
-  triggerSchema: z.object({
-    city: z.string().describe('The city to get the weather for'),
+// 業種に応じた質問を生成するステップ
+const askAboutIndustry = new Step({
+  id: 'askAboutIndustry',
+  outputSchema: z.object({
+    question: z.string(),
   }),
-})
-  .step(fetchWeather)
-  .then(planActivities);
+  execute: async ({ context }) => {
+    const candidateInfo = context?.getStepResult<{ candidateName: string; industryType: string; resumeText: string }>('gatherCandidateInfo');
 
-weatherWorkflow.commit();
+    const prompt = `You are a recruiter. Given the resume below, craft a short question for ${candidateInfo?.candidateName} about their experience in the "${candidateInfo?.industryType}" industry.
+Resume: ${candidateInfo?.resumeText}`;
 
-export { weatherWorkflow };
+    const res = await recruiterAgent.generate(prompt);
+    return { question: res?.text?.trim() || '' };
+  },
+});
+
+// 一般職種に関する質問を生成するステップ
+const askAboutGeneralRole = new Step({
+  id: 'askAboutGeneralRole',
+  outputSchema: z.object({
+    question: z.string(),
+  }),
+  execute: async ({ context }) => {
+    const candidateInfo = context?.getStepResult<{ candidateName: string; industryType: string; resumeText: string }>('gatherCandidateInfo');
+
+    const prompt = `You are a recruiter. Given the resume below, craft a short question for ${candidateInfo?.candidateName} about their experience in the "${candidateInfo?.industryType}" industry, especially for an administrative role. Resume: ${candidateInfo?.resumeText}`;
+
+    const res = await recruiterAgent.generate(prompt);
+    return { question: res?.text?.trim() || '' };
+  },
+});
+
+// 学歴に関する質問を生成するステップ
+const askAboutEducation = new Step({
+  id: 'askAboutEducation',
+  outputSchema: z.object({
+    question: z.string(),
+  }),
+  execute: async ({ context }) => {
+    const candidateInfo = context?.getStepResult<{ candidateName: string; education: string; resumeText: string }>('gatherCandidateInfo');
+
+    const prompt = `You are a recruiter. Given the resume below, craft a short question for ${candidateInfo?.candidateName} about their education background: "${candidateInfo?.education}".
+Resume: ${candidateInfo?.resumeText}`;
+
+    const res = await recruiterAgent.generate(prompt);
+    return { question: res?.text?.trim() || '' };
+  },
+});
+
+// 大学生向け新規採用の質問を生成するステップ
+const askAboutUniversityExperience = new Step({
+  id: 'askAboutUniversityExperience',
+  outputSchema: z.object({
+    question: z.string(),
+  }),
+  execute: async ({ context }) => {
+    const candidateInfo = context?.getStepResult<{ candidateName: string; education: string; resumeText: string }>('gatherCandidateInfo');
+
+    const prompt = `You are a recruiter. Given the resume below, craft a short question for ${candidateInfo?.candidateName} about their university studies: "${candidateInfo?.education}". Resume: ${candidateInfo?.resumeText}`;
+
+    const res = await recruiterAgent.generate(prompt);
+    return { question: res?.text?.trim() || '' };
+  },
+});
+
+// 資格とスキルに関する質問を生成するステップ
+const askAboutSkills = new Step({
+  id: 'askAboutSkills',
+  outputSchema: z.object({
+    question: z.string(),
+  }),
+  execute: async ({ context }) => {
+    const candidateInfo = context?.getStepResult<{ candidateName: string; specialty: string; resumeText: string }>('gatherCandidateInfo');
+
+    const prompt = `You are a recruiter. Given the resume below, craft a short question for ${candidateInfo?.candidateName} about how they use their skills in "${candidateInfo?.specialty}". Resume: ${candidateInfo?.resumeText}`;
+
+    const res = await recruiterAgent.generate(prompt);
+    return { question: res?.text?.trim() || '' };
+  },
+});
+
+// 出身地に関する質問を生成するステップ
+const askAboutHometown = new Step({
+  id: 'askAboutHometown',
+  outputSchema: z.object({
+    question: z.string(),
+  }),
+  execute: async ({ context }) => {
+    const candidateInfo = context?.getStepResult<{ candidateName: string; hometown: string; resumeText: string }>('gatherCandidateInfo');
+
+    const prompt = `You are a recruiter. Given the resume below, craft a short question for ${candidateInfo?.candidateName} about their hometown: "${candidateInfo?.hometown}".
+Resume: ${candidateInfo?.resumeText}`;
+
+    const res = await recruiterAgent.generate(prompt);
+    return { question: res?.text?.trim() || '' };
+  },
+});
+
+// 技術者以外の役割に関する質問を生成するステップ
+const askAboutRole = new Step({
+  id: 'askAboutRole',
+  outputSchema: z.object({
+    question: z.string(),
+  }),
+  execute: async ({ context }) => {
+    const candidateInfo = context?.getStepResult<{ candidateName: string; previousJob: string; resumeText: string }>('gatherCandidateInfo');
+
+    const prompt = `You are a recruiter. Given the resume below, craft a short question for ${candidateInfo?.candidateName} about their previous role: "${candidateInfo?.previousJob}".
+Resume: ${candidateInfo?.resumeText}`;
+
+    const res = await recruiterAgent.generate(prompt);
+    return { question: res?.text?.trim() || '' };
+  },
+});
+
+// 専門性に関する質問を生成するステップ
+const askAboutSpecialty = new Step({
+  id: 'askAboutSpecialty',
+  outputSchema: z.object({
+    question: z.string(),
+  }),
+  execute: async ({ context }) => {
+    const candidateInfo = context?.getStepResult<{ candidateName: string; specialty: string; resumeText: string }>('gatherCandidateInfo');
+
+    const prompt = `You are a recruiter. Given the resume below, craft a short question for ${candidateInfo?.candidateName} about their specialty: "${candidateInfo?.specialty}".
+Resume: ${candidateInfo?.resumeText}`;
+
+    const res = await recruiterAgent.generate(prompt);
+    return { question: res?.text?.trim() || '' };
+  },
+});
+
+// 志望動機に関する質問を生成するステップ（大学生向け）
+const askAboutMotivation = new Step({
+  id: 'askAboutMotivation',
+  outputSchema: z.object({
+    question: z.string(),
+  }),
+  execute: async ({ context }) => {
+    const candidateInfo = context?.getStepResult<{ candidateName: string; resumeText: string }>('gatherCandidateInfo');
+
+    const prompt = `You are a recruiter. Given the resume below, craft a short question for ${candidateInfo?.candidateName} about why they are interested in this role and how they envision their future career. Resume: ${candidateInfo?.resumeText}`;
+
+    const res = await recruiterAgent.generate(prompt);
+    return { question: res?.text?.trim() || '' };
+  },
+});
+
+
+// 質問を集めるステップ
+const collectQuestions = new Step({
+  id: 'collectQuestions',
+  outputSchema: z.object({
+    questions: z.array(z.string()),
+  }),
+  execute: async ({ context }) => {
+    const questions = [
+      context.getStepResult('askAboutIndustry')?.question,
+      context.getStepResult('askAboutGeneralRole')?.question,
+      context.getStepResult('askAboutEducation')?.question,
+      context.getStepResult('askAboutHometown')?.question,
+      context.getStepResult('askAboutSpecialty')?.question,
+      context.getStepResult('askAboutSkills')?.question,
+      context.getStepResult('askAboutRole')?.question,
+      context.getStepResult('askAboutMotivation')?.question,
+    ].filter((q) => q) as string[];
+    return { questions };
+  },
+});
+
+
+// ワークフローの構築
+export const candidateWorkflow = new Workflow({
+  name: 'candidate-workflow',
+  triggerSchema: z.object({
+    resumeText: z.string(),
+  }),
+});
+
+candidateWorkflow
+  .step(gatherCandidateInfo)
+  .then(askAboutIndustry, {
+    when: { 'gatherCandidateInfo.industryType': 'General Office Work' },
+  })
+  .then(askAboutGeneralRole)
+  .then(askAboutEducation)
+  .then(askAboutHometown)
+  .then(askAboutSpecialty, {
+    when: { 'gatherCandidateInfo.isTechnical': true },
+  })
+  .then(askAboutSkills)
+  .step(askAboutRole, {
+    when: { 'gatherCandidateInfo.isTechnical': false },
+  })
+  .then(askAboutMotivation)
+  .then(collectQuestions) // 追加
+  .commit();
+
+
+
+candidateWorkflow.commit();
