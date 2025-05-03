@@ -24,7 +24,7 @@ export default function UploadPage() {
     formData.append('resume', file);
 
     try {
-      const res = await fetch('/api/upload-resume', {
+      const res = await fetch('/api/screen-candidate', {
         method: 'POST',
         body: formData,
       });
