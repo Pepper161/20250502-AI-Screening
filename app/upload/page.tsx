@@ -7,16 +7,16 @@ export default function UploadPage() {
   const [questions, setQuestions] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setFile(e.target.files[0]);
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files && event.target.files.length > 0) {
+      setFile(event.target.files[0]);
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
     if (!file) {
-      setError('Please select a file');
+      setError('PDFファイルを選択してください');
       return;
     }
 
@@ -24,36 +24,38 @@ export default function UploadPage() {
     formData.append('resume', file);
 
     try {
-      const res = await fetch('/api/screen-candidate', {
+      const response = await fetch('/api/screen-candidate', {
         method: 'POST',
         body: formData,
       });
-      const data = await res.json();
-      if (res.ok) {
-        setQuestions(data.questions);
-        setError(null);
-      } else {
-        setError(data.error);
+
+      if (!response.ok) {
+        throw new Error('APIリクエストに失敗しました');
       }
+
+      const data = await response.json();
+      setQuestions(data.questions || []);
+      setError(null);
     } catch (err) {
-      setError('An error occurred');
+      setError(err instanceof Error ? err.message : '不明なエラー');
+      setQuestions([]);
     }
   };
 
   return (
-    <div>
-      <h1>Upload Resume</h1>
+    <div style={{ padding: '20px', fontFamily: 'Arial, sans-serif' }}>
+      <h1>履歴書アップロード</h1>
       <form onSubmit={handleSubmit}>
         <input type="file" accept="application/pdf" onChange={handleFileChange} />
-        <button type="submit">Upload</button>
+        <button type="submit">アップロード</button>
       </form>
       {error && <p style={{ color: 'red' }}>{error}</p>}
       {questions.length > 0 && (
         <div>
-          <h2>Generated Questions:</h2>
+          <h2>生成された質問</h2>
           <ul>
-            {questions.map((q, index) => (
-              <li key={index}>{q}</li>
+            {questions.map((question, index) => (
+              <li key={index}>{question}</li>
             ))}
           </ul>
         </div>

@@ -50,6 +50,7 @@ export async function POST(req: Request) {
     const { start } = mastra.getWorkflow('candidateWorkflow').createRun();
     let runResult;
     try {
+      console.log('ワークフローに渡すtriggerData:', { resumeText }); // デバッグ用
       runResult = await start({
         triggerData: { resumeText },
       });

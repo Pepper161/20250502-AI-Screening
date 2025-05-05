@@ -9,41 +9,88 @@ const gatherCandidateInfo = new Step({
     resumeText: z.string(),
   }),
   outputSchema: z.object({
-    candidateName: z.string(),
-    isTechnical: z.boolean(),
-    specialty: z.string(),
-    industryType: z.string(),
-    previousJob: z.string(),
-    hometown: z.string(),
-    education: z.string(),
+    candidateName: z.string().optional(),
+    isTechnical: z.boolean().optional(),
+    specialty: z.string().optional(),
+    industryType: z.string().optional(),
+    previousJob: z.string().optional(),
+    hometown: z.string().optional(),
+    education: z.string().optional(),
     resumeText: z.string(),
   }),
   execute: async ({ context }) => {
     const resumeText = context?.getStepResult<{ resumeText: string }>('trigger')?.resumeText || '';
-    const prompt = `以下の履歴書テキストから次の詳細を抽出してください：
-1. 候補者氏名
-2. 技術職かどうか（true/false）
-3. 専門分野またはスキル
-4. 勤務している業界（例：建設、IT、一般事務）
-5. 前職の役職
-6. 出身地
-7. 学歴
-"${resumeText}"`;
+    console.log('Received resumeText in gatherCandidateInfo:', resumeText); // デバッグ用
+    const prompt = `以下の日本語の履歴書テキストを解析し、指定されたフィールドに情報を抽出してください。情報が見つからない場合は空の文字列を返し、技術職かどうかは「エンジニア」「開発者」などのキーワードが含まれていればtrueと判断してください。必ず以下のJSON形式で応答してください。応答はJSONのみで、説明や余計なテキストを含めないでください：
+{
+  "candidateName": "",
+  "isTechnical": false,
+  "specialty": "",
+  "industryType": "",
+  "previousJob": "",
+  "hometown": "",
+  "education": "",
+  "resumeText": ""
+}
+例：
+{
+  "candidateName": "青木 大地",
+  "isTechnical": true,
+  "specialty": "Webアプリケーション開発",
+  "industryType": "IT",
+  "previousJob": "ソフトウェアエンジニア",
+  "hometown": "東京都新宿区",
+  "education": "東京大学 コンピュータサイエンス学部 卒業",
+  "resumeText": "履歴書 氏名 : 青木 大地 ..."
+}
+フィールド：
+- candidateName: 氏名（履歴書の上部に見出し「氏名」で記載）
+- isTechnical: 技術職かどうか（true/false）
+- specialty: 専門分野またはスキル（職歴やスキルセクションから）
+- industryType: 勤務業界（例：IT、一般事務、職歴から推測）
+- previousJob: 前職の役職
+- hometown: 出身地（住所から推測）
+- education: 学歴（見出し「学歴」以下）
+- resumeText: 元のテキスト（そのまま返す）
+履歴書: "${resumeText}"`;
 
-    const res = await recruiterAgent.generate(prompt, {
-      output: z.object({
-        candidateName: z.string(),
-        isTechnical: z.boolean(),
-        specialty: z.string(),
-        industryType: z.string(),
-        previousJob: z.string(),
-        hometown: z.string(),
-        education: z.string(),
-        resumeText: z.string(),
-      }),
-    });
-
-    return res.object;
+    try {
+      const res = await recruiterAgent.generate(prompt, {
+        output: z.object({
+          candidateName: z.string().optional(),
+          isTechnical: z.boolean().optional(),
+          specialty: z.string().optional(),
+          industryType: z.string().optional(),
+          previousJob: z.string().optional(),
+          hometown: z.string().optional(),
+          education: z.string().optional(),
+          resumeText: z.string(),
+        }),
+      });
+      console.log('Agent response in gatherCandidateInfo:', res.object);
+      return res.object || {
+        candidateName: '',
+        isTechnical: false,
+        specialty: '',
+        industryType: '',
+        previousJob: '',
+        hometown: '',
+        education: '',
+        resumeText,
+      };
+    } catch (error) {
+      console.error('Agent generation error in gatherCandidateInfo:', error);
+      return {
+        candidateName: '',
+        isTechnical: false,
+        specialty: '',
+        industryType: '',
+        previousJob: '',
+        hometown: '',
+        education: '',
+        resumeText,
+      };
+    }
   },
 });
 
@@ -54,27 +101,12 @@ const askAboutIndustry = new Step({
     question: z.string(),
   }),
   execute: async ({ context }) => {
-    const candidateInfo = context?.getStepResult<{ candidateName: string; industryType: string; resumeText: string }>('gatherCandidateInfo');
+    const candidateInfo = context?.getStepResult<{ candidateName: string; industryType: string; resumeText: string }>('gatherCandidateInfo') || { candidateName: '', industryType: '', resumeText: '' };
+    console.log('candidateInfo in askAboutIndustry:', candidateInfo);
+    if (!candidateInfo.industryType) return { question: '業界に関する情報が不足しています。どの業界で働いていましたか？' };
 
-    const prompt = `あなたは採用担当者です。以下の履歴書に基づき、${candidateInfo?.candidateName}に対して"${candidateInfo?.industryType}"業界での経験について短い質問を作成してください。
-履歴書: ${candidateInfo?.resumeText}`;
-
-    const res = await recruiterAgent.generate(prompt);
-    return { question: res?.text?.trim() || '' };
-  },
-});
-
-// 一般職種に関する質問を生成するステップ
-const askAboutGeneralRole = new Step({
-  id: 'askAboutGeneralRole',
-  outputSchema: z.object({
-    question: z.string(),
-  }),
-  execute: async ({ context }) => {
-    const candidateInfo = context?.getStepResult<{ candidateName: string; industryType: string; resumeText: string }>('gatherCandidateInfo');
-
-    const prompt = `あなたは採用担当者です。以下の履歴書に基づき、${candidateInfo?.candidateName}に対して"${candidateInfo?.industryType}"業界での経験、特に事務職について短い質問を作成してください。履歴書: ${candidateInfo?.resumeText}`;
-
+    const prompt = `あなたは採用担当者です。以下の履歴書に基づき、${candidateInfo.candidateName || '候補者'}に対して"${candidateInfo.industryType}"業界での経験について短い質問を作成してください。質問は日本語で、簡潔にしてください。
+履歴書: ${candidateInfo.resumeText}`;
     const res = await recruiterAgent.generate(prompt);
     return { question: res?.text?.trim() || '' };
   },
@@ -87,43 +119,12 @@ const askAboutEducation = new Step({
     question: z.string(),
   }),
   execute: async ({ context }) => {
-    const candidateInfo = context?.getStepResult<{ candidateName: string; education: string; resumeText: string }>('gatherCandidateInfo');
+    const candidateInfo = context?.getStepResult<{ candidateName: string; education: string; resumeText: string }>('gatherCandidateInfo') || { candidateName: '', education: '', resumeText: '' };
+    console.log('candidateInfo in askAboutEducation:', candidateInfo);
+    if (!candidateInfo.education) return { question: '学歴に関する情報が不足しています。具体的な学歴を教えてください。' };
 
-    const prompt = `あなたは採用担当者です。以下の履歴書に基づき、${candidateInfo?.candidateName}に対して学歴"${candidateInfo?.education}"について短い質問を作成してください。
-履歴書: ${candidateInfo?.resumeText}`;
-
-    const res = await recruiterAgent.generate(prompt);
-    return { question: res?.text?.trim() || '' };
-  },
-});
-
-// 大学生向け新規採用の質問を生成するステップ
-const askAboutUniversityExperience = new Step({
-  id: 'askAboutUniversityExperience',
-  outputSchema: z.object({
-    question: z.string(),
-  }),
-  execute: async ({ context }) => {
-    const candidateInfo = context?.getStepResult<{ candidateName: string; education: string; resumeText: string }>('gatherCandidateInfo');
-
-    const prompt = `あなたは採用担当者です。以下の履歴書に基づき、${candidateInfo?.candidateName}に対して大学での学び"${candidateInfo?.education}"について短い質問を作成してください。履歴書: ${candidateInfo?.resumeText}`;
-
-    const res = await recruiterAgent.generate(prompt);
-    return { question: res?.text?.trim() || '' };
-  },
-});
-
-// 資格とスキルに関する質問を生成するステップ
-const askAboutSkills = new Step({
-  id: 'askAboutSkills',
-  outputSchema: z.object({
-    question: z.string(),
-  }),
-  execute: async ({ context }) => {
-    const candidateInfo = context?.getStepResult<{ candidateName: string; specialty: string; resumeText: string }>('gatherCandidateInfo');
-
-    const prompt = `あなたは採用担当者です。以下の履歴書に基づき、${candidateInfo?.candidateName}に対して"${candidateInfo?.specialty}"のスキル使用について短い質問を作成してください。履歴書: ${candidateInfo?.resumeText}`;
-
+    const prompt = `あなたは採用担当者です。以下の履歴書に基づき、${candidateInfo.candidateName || '候補者'}に対して学歴"${candidateInfo.education}"について短い質問を作成してください。質問は日本語で、簡潔にしてください。
+履歴書: ${candidateInfo.resumeText}`;
     const res = await recruiterAgent.generate(prompt);
     return { question: res?.text?.trim() || '' };
   },
@@ -136,63 +137,29 @@ const askAboutHometown = new Step({
     question: z.string(),
   }),
   execute: async ({ context }) => {
-    const candidateInfo = context?.getStepResult<{ candidateName: string; hometown: string; resumeText: string }>('gatherCandidateInfo');
+    const candidateInfo = context?.getStepResult<{ candidateName: string; hometown: string; resumeText: string }>('gatherCandidateInfo') || { candidateName: '', hometown: '', resumeText: '' };
+    console.log('candidateInfo in askAboutHometown:', candidateInfo);
+    if (!candidateInfo.hometown) return { question: '出身地に関する情報が不足しています。出身地を教えてください。' };
 
-    const prompt = `あなたは採用担当者です。以下の履歴書に基づき、${candidateInfo?.candidateName}に対して出身地"${candidateInfo?.hometown}"について短い質問を作成してください。
-履歴書: ${candidateInfo?.resumeText}`;
-
+    const prompt = `あなたは採用担当者です。以下の履歴書に基づき、${candidateInfo.candidateName || '候補者'}に対して出身地"${candidateInfo.hometown}"について短い質問を作成してください。質問は日本語で、簡潔にしてください。
+履歴書: ${candidateInfo.resumeText}`;
     const res = await recruiterAgent.generate(prompt);
     return { question: res?.text?.trim() || '' };
   },
 });
 
-// 技術者以外の役割に関する質問を生成するステップ
-const askAboutRole = new Step({
-  id: 'askAboutRole',
-  outputSchema: z.object({
-    question: z.string(),
-  }),
-  execute: async ({ context }) => {
-    const candidateInfo = context?.getStepResult<{ candidateName: string; previousJob: string; resumeText: string }>('gatherCandidateInfo');
-
-    const prompt = `あなたは採用担当者です。以下の履歴書に基づき、${candidateInfo?.candidateName}に対して前職"${candidateInfo?.previousJob}"について短い質問を作成してください。
-履歴書: ${candidateInfo?.resumeText}`;
-
-    const res = await recruiterAgent.generate(prompt);
-    return { question: res?.text?.trim() || '' };
-  },
-});
-
-// 専門性に関する質問を生成するステップ
-const askAboutSpecialty = new Step({
-  id: 'askAboutSpecialty',
-  outputSchema: z.object({
-    question: z.string(),
-  }),
-  execute: async ({ context }) => {
-    const candidateInfo = context?.getStepResult<{ candidateName: string; specialty: string; resumeText: string }>('gatherCandidateInfo');
-
-    const prompt = `あなたは採用担当者です。以下の履歴書に基づき、${candidateInfo?.candidateName}に対して専門分野"${candidateInfo?.specialty}"について短い質問を作成してください。
-履歴書: ${candidateInfo?.resumeText}`;
-
-    const res = await recruiterAgent.generate(prompt);
-    return { question: res?.text?.trim() || '' };
-  },
-});
-
-// 志望動機に関する質問を生成するステップ（大学生向け）
+// 志望動機に関する質問を生成するステップ
 const askAboutMotivation = new Step({
   id: 'askAboutMotivation',
   outputSchema: z.object({
     question: z.string(),
   }),
   execute: async ({ context }) => {
-    const candidateInfo = context?.getStepResult<{ candidateName: string; resumeText: string }>('gatherCandidateInfo');
-
-    const prompt = `あなたは採用担当者です。以下の履歴書に基づき、${candidateInfo?.candidateName}に対してこの役職への志望動機と将来のキャリアビジョンについて短い質問を作成してください。履歴書: ${candidateInfo?.resumeText}`;
-
+    const candidateInfo = context?.getStepResult<{ candidateName: string; resumeText: string }>('gatherCandidateInfo') || { candidateName: '', resumeText: '' };
+    console.log('candidateInfo in askAboutMotivation:', candidateInfo);
+    const prompt = `あなたは採用担当者です。以下の履歴書に基づき、${candidateInfo.candidateName || '候補者'}に対してこの役職への志望動機と将来のキャリアビジョンについて短い質問を作成してください。質問は日本語で、簡潔にしてください。履歴書: ${candidateInfo.resumeText}`;
     const res = await recruiterAgent.generate(prompt);
-    return { question: res?.text?.trim() || '' };
+    return { question: res?.text?.trim() || '志望動機について教えてください。' };
   },
 });
 
@@ -205,15 +172,11 @@ const collectQuestions = new Step({
   execute: async ({ context }) => {
     const questions = [
       context.getStepResult('askAboutIndustry')?.question,
-      context.getStepResult('askAboutGeneralRole')?.question,
       context.getStepResult('askAboutEducation')?.question,
       context.getStepResult('askAboutHometown')?.question,
-      context.getStepResult('askAboutSpecialty')?.question,
-      context.getStepResult('askAboutSkills')?.question,
-      context.getStepResult('askAboutRole')?.question,
       context.getStepResult('askAboutMotivation')?.question,
-      context.getStepResult('askAboutUniversityExperience')?.question,
-    ].filter((q) => q) as string[];
+    ].filter((q) => q && q.trim().length > 0) as string[];
+    console.log('Collected questions:', questions);
     return { questions };
   },
 });
@@ -228,14 +191,9 @@ export const candidateWorkflow = new Workflow({
 
 candidateWorkflow
   .step(gatherCandidateInfo)
-  .step(askAboutEducation)
-  .step(askAboutHometown)
-  .step(askAboutMotivation)
-  .step(askAboutUniversityExperience)
-  .step(askAboutIndustry, { when: { 'gatherCandidateInfo.industryType': 'General Office Work' } })
-  .step(askAboutGeneralRole, { when: { 'gatherCandidateInfo.industryType': 'General Office Work' } })
-  .step(askAboutSpecialty, { when: { 'gatherCandidateInfo.isTechnical': true } })
-  .step(askAboutSkills, { when: { 'gatherCandidateInfo.isTechnical': true } })
-  .step(askAboutRole, { when: { 'gatherCandidateInfo.isTechnical': false } })
-  .step(collectQuestions)
+  .then(askAboutEducation)
+  .then(askAboutHometown)
+  .then(askAboutMotivation)
+  .then(askAboutIndustry)
+  .then(collectQuestions)
   .commit();
