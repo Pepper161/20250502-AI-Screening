@@ -1,65 +1,71 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import QuestionPage from './src/components/QuestionPage';
+
+interface Question {
+  id: string;
+  text: string;
+}
 
 export default function UploadPage() {
-  const [file, setFile] = useState<File | null>(null);
-  const [questions, setQuestions] = useState<string[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const router = useRouter();
 
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (event.target.files && event.target.files.length > 0) {
-      setFile(event.target.files[0]);
-    }
-  };
+  useEffect(() => {
+    const storedQuestions = sessionStorage.getItem('questions');
+    if (storedQuestions) {
+      const rawQuestions: Question[] = JSON.parse(storedQuestions);
 
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!file) {
-      setError('PDFファイルを選択してください');
-      return;
-    }
+      // サブ質問を分割して新しい質問リストを作成
+      const splitQuestions: Question[] = [];
+      rawQuestions.forEach((q, index) => {
+        // 改行で分割し、空行を除外
+        const lines = q.text.split('\n').filter(line => line.trim().length > 0);
 
-    const formData = new FormData();
-    formData.append('resume', file);
+        // 番号付きリスト（例: 1.）を持つ行のみをサブ質問として扱う
+        const subQuestions: string[] = [];
+        lines.forEach((line, lineIndex) => {
+          const trimmedLine = line.trim();
+          if (trimmedLine.match(/^\d+\.\s*.+/)) {
+            // 番号付きのサブ質問の場合、番号を削除して追加
+            const subQ = trimmedLine.replace(/^\d+\.\s*/, '');
+            if (subQ) {
+              subQuestions.push(subQ);
+            }
+          } else if (lineIndex === 0) {
+            // 最初の行がサブ質問でない場合、メイン質問として扱う（スキップ）
+            return;
+          }
+        });
 
-    try {
-      const response = await fetch('/api/screen-candidate', {
-        method: 'POST',
-        body: formData,
+        if (subQuestions.length > 0) {
+          subQuestions.forEach((subQ, subIndex) => {
+            splitQuestions.push({
+              id: `q${index + 1}_${subIndex + 1}`,
+              text: subQ,
+            });
+          });
+        } else {
+          // サブ質問がない場合、最初の行をメイン質問として追加
+          splitQuestions.push({
+            id: `q${index + 1}`,
+            text: lines[0].trim(),
+          });
+        }
       });
 
-      if (!response.ok) {
-        throw new Error('APIリクエストに失敗しました');
-      }
-
-      const data = await response.json();
-      setQuestions(data.questions || []);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '不明なエラー');
-      setQuestions([]);
+      setQuestions(splitQuestions);
+    } else {
+      // 質問がない場合、ホームに戻る
+      router.push('/');
     }
-  };
+  }, [router]);
 
-  return (
-    <div style={{ padding: '20px', fontFamily: 'Arial, sans-serif' }}>
-      <h1>履歴書アップロード</h1>
-      <form onSubmit={handleSubmit}>
-        <input type="file" accept="application/pdf" onChange={handleFileChange} />
-        <button type="submit">アップロード</button>
-      </form>
-      {error && <p style={{ color: 'red' }}>{error}</p>}
-      {questions.length > 0 && (
-        <div>
-          <h2>生成された質問</h2>
-          <ul>
-            {questions.map((question, index) => (
-              <li key={index}>{question}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </div>
-  );
+  if (questions.length === 0) {
+    return <div>読み込み中...</div>;
+  }
+
+  return <QuestionPage initialQuestions={questions} />;
 }
