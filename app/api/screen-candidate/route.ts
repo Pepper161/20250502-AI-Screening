@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import PDFParser from 'pdf2json';
 import { mastra } from '@/mastra';
-import { StepResult } from '@mastra/core/workflows';
 
 type CollectQuestionsOutput = {
   questions: string[];
@@ -30,18 +29,18 @@ export async function POST(req: Request) {
     let resumeText: string;
     try {
       resumeText = await new Promise<string>((resolve, reject) => {
-        pdfParser.on('pdfParser_dataReady', (pdfData) => {
-          const text = pdfData.Pages.map((page: any) =>
-            page.Texts.map((text: any) => decodeURIComponent(text.R[0].T)).join(' ')
+        pdfParser.on('pdfParser_dataReady', (pdfData: { Pages: { Texts: { R: { T: string }[] }[] }[] }) => {
+          const text = pdfData.Pages.map((page) =>
+            page.Texts.map((text) => decodeURIComponent(text.R[0].T)).join(' ')
           ).join(' ');
           resolve(text);
         });
-        pdfParser.on('pdfParser_dataError', (err: any) => reject(new Error(`PDF解析エラー: ${JSON.stringify(err)}`)));
+        pdfParser.on('pdfParser_dataError', (err: Error) => reject(new Error(`PDF解析エラー: ${JSON.stringify(err)}`)));
         pdfParser.parseBuffer(buffer);
       });
     } catch (pdfError) {
       console.error('PDF解析エラー:', pdfError);
-      return NextResponse.json({ error: 'PDFファイルの解析に失敗しました', details: pdfError instanceof Error ? pdfError.message : '不明なエラー' }, { status: 500 });
+      return NextResponse.json({ error: 'PDFファイルの解析に失敗しました', details: (pdfError as Error).message }, { status: 500 });
     }
 
     console.log('解析された履歴書テキスト:', resumeText);
@@ -58,7 +57,7 @@ export async function POST(req: Request) {
       console.error('ワークフロー実行エラー:', workflowError);
       return NextResponse.json({ 
         error: 'ワークフロー実行に失敗しました', 
-        details: workflowError instanceof Error ? workflowError.message : '不明なエラー' 
+        details: (workflowError as Error).message 
       }, { status: 500 });
     }
 
@@ -82,7 +81,7 @@ export async function POST(req: Request) {
     console.error('一般エラー:', error);
     return NextResponse.json({ 
       error: 'エラーが発生しました。', 
-      details: error instanceof Error ? error.message : '不明なエラー' 
+      details: (error as Error).message 
     }, { status: 500 });
   }
 }
