@@ -6,7 +6,7 @@
   "scripts": {
     "test-workflow": "ts-node --esm src/mastra/index.ts",
     "dev": "next dev",
-    "build": "next build",
+    "build": "npx prisma generate && next build",
     "start": "next start",
     "lint": "next lint",
     "clean": "rd /s /q .next"
@@ -44,12 +44,14 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/webpack": "^5.28.5",
+    "@vitejs/plugin-react": "^4.4.1",
     "eslint": "^9",
     "eslint-config-next": "15.3.1",
     "ignore-loader": "^0.1.2",
     "tailwindcss": "^4",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.3",
+    "vite": "^6.3.5",
     "webpack": "^5.99.7"
   }
 }

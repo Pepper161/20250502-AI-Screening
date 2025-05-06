@@ -36,7 +36,7 @@ export const submitAnswers = async (
       resolve({
         success: true,
         message: '回答が正常に送信されました！',
-        data: { answers }
+        data: answers
       });
     }, 2000); // Simulate network delay
   });
