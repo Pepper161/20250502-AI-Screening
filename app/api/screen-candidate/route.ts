@@ -35,7 +35,10 @@ export async function POST(req: Request) {
           ).join(' ');
           resolve(text);
         });
-        pdfParser.on('pdfParser_dataError', (err: Error) => reject(new Error(`PDF解析エラー: ${JSON.stringify(err)}`)));
+        pdfParser.on('pdfParser_dataError', (errMsg: { parserError: Error }) => {
+          const error = errMsg.parserError;
+          reject(new Error(`PDF解析エラー: ${error.message}`));
+        });
         pdfParser.parseBuffer(buffer);
       });
     } catch (pdfError) {
