@@ -1,16 +1,14 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Question, Answer } from '../types';
+import { Question } from '../types';
 import QuestionList from './QuestionList';
 import SubmitButton from './SubmitButton';
 import { useFormValidation } from '../hooks/useFormValidation';
 import { submitAnswers } from '../utils/api';
-import LoadingSpinner from './LoadingSpinner';
 import NotificationMessage from './NotificationMessage';
 
 const AnswerForm: React.FC<{ initialQuestions: Question[] }> = ({ initialQuestions }) => {
-  const [questions, setQuestions] = useState<Question[]>(initialQuestions);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [notification, setNotification] = useState<{
@@ -23,10 +21,10 @@ const AnswerForm: React.FC<{ initialQuestions: Question[] }> = ({ initialQuestio
     isVisible: false
   });
 
-  const { isValid, getValidationState } = useFormValidation(questions, answers);
+  const { isValid, getValidationState } = useFormValidation(initialQuestions, answers);
 
   // Map question IDs to validation states
-  const validationStates = questions.reduce(
+  const validationStates = initialQuestions.reduce(
     (acc, question) => ({
       ...acc,
       [question.id]: getValidationState(question.id)
@@ -70,12 +68,11 @@ const AnswerForm: React.FC<{ initialQuestions: Question[] }> = ({ initialQuestio
       
       if (response.success) {
         showNotification('success', response.message || '回答が正常に送信されました！');
-        // Reset form if needed or redirect
-        // window.location.href = '/thankyou';
       } else {
         showNotification('error', response.message || '送信に失敗しました。もう一度お試しください。');
       }
     } catch (error) {
+      console.error('Submission error:', error);
       showNotification('error', '送信に失敗しました。もう一度お試しください。');
     } finally {
       setIsSubmitting(false);
@@ -86,7 +83,7 @@ const AnswerForm: React.FC<{ initialQuestions: Question[] }> = ({ initialQuestio
     <div className="w-full max-w-4xl mx-auto">
       <form className="space-y-8">
         <QuestionList
-          questions={questions}
+          questions={initialQuestions}
           answers={answers}
           validationStates={validationStates}
           onAnswerChange={handleAnswerChange}

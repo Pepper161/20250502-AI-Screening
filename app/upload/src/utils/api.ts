@@ -20,6 +20,7 @@ export const fetchQuestions = async (formData: FormData): Promise<Question[]> =>
         }));
         resolve(questions);
       } catch (error) {
+        console.error('Fetch questions error:', error);
         reject(new Error('質問の取得に失敗しました'));
       }
     }, 1500); // Simulate network delay
