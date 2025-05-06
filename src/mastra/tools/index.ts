@@ -29,6 +29,7 @@ export const resumeAnalysisTool = createTool({
 
 // 履歴書解析ロジック（仮実装）
 const analyzeResume = async (resumeText: string) => {
+  console.log('Analyzing resume:', resumeText); // resumeTextを使用
   // Simulated analysis (実際にはLLMや外部APIを使用する)
   return {
     name: 'Simulated Candidate',

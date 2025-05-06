@@ -20,5 +20,5 @@ export interface FormState {
 export interface ApiResponse {
   success: boolean;
   message?: string;
-  data?: any;
+  data?: Record<string, string> | Question[];
 }
