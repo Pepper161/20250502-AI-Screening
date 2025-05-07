@@ -100,7 +100,8 @@ export async function POST(req: Request) {
       );
     }
 
-    // questions を { id, text } の形式に変換
+    // questions を { id, text } の形式に変換suru
+    
     const questions = collectQuestionsResult.output.questions.map((q: string, index: number) => ({
       id: `q${index + 1}`,
       text: q,
