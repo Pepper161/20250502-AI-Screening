@@ -16,13 +16,13 @@ export default function UploadPage() {
   useEffect(() => {
     const storedQuestions = sessionStorage.getItem('questions');
     if (storedQuestions) {
-      const rawQuestions: Question[] = JSON.parse(storedQuestions);
+      const rawQuestions: string[] = JSON.parse(storedQuestions);
 
       // サブ質問を分割して新しい質問リストを作成
       const splitQuestions: Question[] = [];
       rawQuestions.forEach((q, index) => {
         // 改行で分割し、空行を除外
-        const lines = q.text.split('\n').filter(line => line.trim().length > 0);
+        const lines = q.split('\n').filter(line => line.trim().length > 0);
 
         // 番号付きリスト（例: 1.）を持つ行のみをサブ質問として扱う
         const subQuestions: string[] = [];
