@@ -1,37 +1,34 @@
 import { NextResponse } from "next/server";
-import { PrismaClient } from "@prisma/client";
-import { getServerSession } from "next-auth/next";
-
-declare module "next-auth" {
-  interface Session {
-    user: {
-      id: string;
-      name?: string | null;
-      email?: string | null;
-      image?: string | null;
-    };
-  }
-}
-
-const prisma = new PrismaClient();
+import { createPagesServerClient } from "@supabase/auth-helpers-nextjs";
+import { cookies } from "next/headers";
 
 export async function POST(req: Request) {
-  const session = await getServerSession();
-  if (!session?.user?.id) {
+  const supabase = createPagesServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    { cookies: () => cookies() }
+  );
+
+  // ユーザー認証を確認
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
     return NextResponse.json({ error: "認証が必要です" }, { status: 401 });
   }
 
+  // リクエストボディから回答を取得
   const { answers }: { answers: { questionId: string; answerText: string }[] } = await req.json();
-  const userId = session.user.id;
+  const userId = user.id;
 
   try {
-    await prisma.answer.createMany({
-      data: answers.map((a) => ({
-        userId,
-        questionId: a.questionId,
-        answerText: a.answerText,
-      })),
-    });
+    // Supabase に回答を保存
+    const { error } = await supabase.from("answers").insert(
+      answers.map((a) => ({
+        user_id: userId,
+        question_id: a.questionId,
+        answer_text: a.answerText,
+      }))
+    );
+    if (error) throw error;
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("保存エラー:", error);
