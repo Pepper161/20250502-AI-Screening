@@ -14,6 +14,7 @@ type CollectQuestionsResult = {
 
 export async function POST(req: Request) {
   try {
+    console.log("リクエストメソッド:", req.method);
     // フォームデータの取得とバリデーション
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
@@ -46,6 +47,7 @@ export async function POST(req: Request) {
         pdfParser.parseBuffer(buffer);
       });
     } catch (pdfError) {
+      console.error("PDF解析エラー:", pdfError);
       return NextResponse.json(
         {
           error: "PDFファイルの解析に失敗しました",
@@ -60,6 +62,7 @@ export async function POST(req: Request) {
     let runResult;
     try {
       console.log("ワークフローに渡すtriggerData:", { resumeText });
+      console.log("環境変数POSTGRES_CONNECTION_STRING:", process.env.POSTGRES_CONNECTION_STRING);
       runResult = await start({
         triggerData: { resumeText },
       });
@@ -100,8 +103,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // questions を { id, text } の形式に変換suru
-    
+    // questions を { id, text } の形式に変換
     const questions = collectQuestionsResult.output.questions.map((q: string, index: number) => ({
       id: `q${index + 1}`,
       text: q,
