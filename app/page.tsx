@@ -47,6 +47,7 @@ export default function Home() {
           console.log("レスポンステキスト:", errorData);
           errorData = JSON.parse(errorData);
         } catch (jsonError) {
+          console.error("JSONパースエラー:", jsonError);
           errorData = { error: "レスポンスが不正です", details: "JSON解析に失敗しました" };
         }
         console.error("APIエラー詳細:", errorData);
@@ -56,7 +57,6 @@ export default function Home() {
       const data = await response.json();
       console.log("APIレスポンス:", data);
       if (data.questions) {
-        // questionsをstring[]形式に変換
         const questionsToStore = data.questions.map((q: { id: string; text: string }) => q.text);
         console.log("保存するquestions:", questionsToStore);
         sessionStorage.setItem("questions", JSON.stringify(questionsToStore));
