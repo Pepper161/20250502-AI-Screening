@@ -15,50 +15,73 @@ export default function UploadPage() {
 
   useEffect(() => {
     const storedQuestions = sessionStorage.getItem('questions');
+    console.log('sessionStorageから取得したquestions:', storedQuestions);
+
     if (storedQuestions) {
-      const rawQuestions: string[] = JSON.parse(storedQuestions);
+      try {
+        const rawQuestions: string[] = JSON.parse(storedQuestions);
+        console.log('パース後のrawQuestions:', rawQuestions);
 
-      // サブ質問を分割して新しい質問リストを作成
-      const splitQuestions: Question[] = [];
-      rawQuestions.forEach((q, index) => {
-        // 改行で分割し、空行を除外
-        const lines = q.split('\n').filter(line => line.trim().length > 0);
+        if (!Array.isArray(rawQuestions)) {
+          console.error('rawQuestionsが配列ではありません:', rawQuestions);
+          router.push('/');
+          return;
+        }
 
-        // 番号付きリスト（例: 1.）を持つ行のみをサブ質問として扱う
-        const subQuestions: string[] = [];
-        lines.forEach((line, lineIndex) => {
-          const trimmedLine = line.trim();
-          if (trimmedLine.match(/^\d+\.\s*.+/)) {
-            // 番号付きのサブ質問の場合、番号を削除して追加
-            const subQ = trimmedLine.replace(/^\d+\.\s*/, '');
-            if (subQ) {
-              subQuestions.push(subQ);
-            }
-          } else if (lineIndex === 0) {
-            // 最初の行がサブ質問でない場合、メイン質問として扱う（スキップ）
+        const splitQuestions: Question[] = [];
+        rawQuestions.forEach((q, index) => {
+          if (typeof q !== 'string') {
+            console.warn(`rawQuestions[${index}]が文字列ではありません:`, q);
             return;
+          }
+
+          console.log(`処理中の質問[${index}]:`, q);
+          const lines = q.split('\n').filter(line => line.trim().length > 0);
+          console.log(`分割後のlines[${index}]:`, lines);
+
+          const subQuestions: string[] = [];
+          lines.forEach((line, lineIndex) => {
+            const trimmedLine = line.trim();
+            if (trimmedLine.match(/^\d+\.\s*.+/)) {
+              const subQ = trimmedLine.replace(/^\d+\.\s*/, '');
+              if (subQ) {
+                subQuestions.push(subQ);
+              }
+            } else if (lineIndex === 0) {
+              return;
+            }
+          });
+
+          if (subQuestions.length > 0) {
+            subQuestions.forEach((subQ, subIndex) => {
+              splitQuestions.push({
+                id: `q${index + 1}_${subIndex + 1}`,
+                text: subQ,
+              });
+            });
+          } else if (lines.length > 0) {
+            splitQuestions.push({
+              id: `q${index + 1}`,
+              text: lines[0].trim(),
+            });
+          } else {
+            console.warn(`質問[${index}]に有効な行がありません`);
           }
         });
 
-        if (subQuestions.length > 0) {
-          subQuestions.forEach((subQ, subIndex) => {
-            splitQuestions.push({
-              id: `q${index + 1}_${subIndex + 1}`,
-              text: subQ,
-            });
-          });
+        console.log('最終的なsplitQuestions:', splitQuestions);
+        if (splitQuestions.length === 0) {
+          console.warn('splitQuestionsが空です。ホームにリダイレクトします');
+          router.push('/');
         } else {
-          // サブ質問がない場合、最初の行をメイン質問として追加
-          splitQuestions.push({
-            id: `q${index + 1}`,
-            text: lines[0].trim(),
-          });
+          setQuestions(splitQuestions);
         }
-      });
-
-      setQuestions(splitQuestions);
+      } catch (error) {
+        console.error('JSONパースエラー:', error);
+        router.push('/');
+      }
     } else {
-      // 質問がない場合、ホームに戻る
+      console.warn('sessionStorageにquestionsが見つかりません');
       router.push('/');
     }
   }, [router]);
