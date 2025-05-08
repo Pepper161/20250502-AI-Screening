@@ -2,6 +2,17 @@ import { Step, Workflow } from '@mastra/core/workflows';
 import { z } from 'zod';
 import { recruiterAgent } from '../agents';
 
+// 言語検出関数
+const detectLanguage = (text: string): 'en' | 'ja' => {
+  // 簡単な言語検出: 英語アルファベットの割合を基準に判定
+  const englishChars = text.match(/[a-zA-Z]/g)?.length || 0;
+  const totalChars = text.length || 1; // ゼロ除算防止
+  const englishRatio = englishChars / totalChars;
+
+  // 英語アルファベットが50%以上なら英語と判定
+  return englishRatio > 0.5 ? 'en' : 'ja';
+};
+
 // 候補者情報を収集するステップ
 const gatherCandidateInfo = new Step({
   id: 'gatherCandidateInfo',
@@ -17,11 +28,52 @@ const gatherCandidateInfo = new Step({
     hometown: z.string().optional(),
     education: z.string().optional(),
     resumeText: z.string(),
+    language: z.enum(['en', 'ja']), // 言語を追加
   }),
   execute: async ({ context }) => {
     const resumeText = context?.getStepResult<{ resumeText: string }>('trigger')?.resumeText || '';
     console.log('Received resumeText in gatherCandidateInfo:', resumeText);
-    const prompt = `以下の日本語の履歴書テキストを解析し、指定されたフィールドに情報を抽出してください。情報が見つからない場合は空の文字列を返し、技術職かどうかは「エンジニア」「開発者」などのキーワードが含まれていればtrueと判断してください。必ず以下のJSON形式で応答してください。応答はJSONのみで、説明や余計なテキストを含めないでください：
+
+    // 言語検出
+    const language = detectLanguage(resumeText);
+    console.log('Detected language:', language);
+
+    // 言語に応じたプロンプトを生成
+    const prompt =
+      language === 'en'
+        ? `Parse the following resume text in English and extract the specified fields. If information is not found, return an empty string. Determine if the candidate is in a technical role based on keywords like "engineer" or "developer". Respond in JSON format only, without any explanations or extra text:
+{
+  "candidateName": "",
+  "isTechnical": false,
+  "specialty": "",
+  "industryType": "",
+  "previousJob": "",
+  "hometown": "",
+  "education": "",
+  "resumeText": ""
+}
+Example:
+{
+  "candidateName": "John Doe",
+  "isTechnical": true,
+  "specialty": "Web Application Development",
+  "industryType": "IT",
+  "previousJob": "Software Engineer",
+  "hometown": "New York, NY",
+  "education": "Bachelor of Science in Computer Science, MIT",
+  "resumeText": "Resume Name: John Doe ..."
+}
+Fields:
+- candidateName: Full name (typically at the top under "Name")
+- isTechnical: Whether the role is technical (true/false)
+- specialty: Specialty or skills (from job history or skills section)
+- industryType: Industry of work (e.g., IT, inferred from job history)
+- previousJob: Previous job title
+- hometown: Hometown (inferred from address)
+- education: Education (under "Education" section)
+- resumeText: Original text (return as-is)
+Resume: "${resumeText}"`
+        : `以下の日本語の履歴書テキストを解析し、指定されたフィールドに情報を抽出してください。情報が見つからない場合は空の文字列を返し、技術職かどうかは「エンジニア」「開発者」などのキーワードが含まれていればtrueと判断してください。必ず以下のJSON形式で応答してください。応答はJSONのみで、説明や余計なテキストを含めないでください：
 {
   "candidateName": "",
   "isTechnical": false,
@@ -68,15 +120,9 @@ const gatherCandidateInfo = new Step({
         }),
       });
       console.log('Agent response in gatherCandidateInfo:', res.object);
-      return res.object || {
-        candidateName: '',
-        isTechnical: false,
-        specialty: '',
-        industryType: '',
-        previousJob: '',
-        hometown: '',
-        education: '',
-        resumeText,
+      return {
+        ...res.object,
+        language,
       };
     } catch (error) {
       console.error('Agent generation error in gatherCandidateInfo:', error);
@@ -89,6 +135,7 @@ const gatherCandidateInfo = new Step({
         hometown: '',
         education: '',
         resumeText,
+        language,
       };
     }
   },
@@ -101,18 +148,40 @@ const askAboutIndustry = new Step({
     question: z.string(),
   }),
   execute: async ({ context }) => {
-    const candidateInfo = context?.getStepResult<{ candidateName: string; industryType: string; resumeText: string }>('gatherCandidateInfo') || { candidateName: '', industryType: '', resumeText: '' };
+    const candidateInfo = context?.getStepResult<{
+      candidateName: string;
+      industryType: string;
+      resumeText: string;
+      language: 'en' | 'ja';
+    }>('gatherCandidateInfo') || { candidateName: '', industryType: '', resumeText: '', language: 'ja' };
     console.log('candidateInfo in askAboutIndustry:', candidateInfo);
-    if (!candidateInfo.industryType) return { question: '業界に関する情報が不足しています。どの業界で働いていましたか？' };
 
-    const prompt = `あなたは採用担当者です。以下の履歴書に基づき、候補者に対して"${candidateInfo.industryType}"業界での経験について、以下の形式で5つの短いサブ質問を作成してください。質問は日本語で、簡潔にしてください。候補者名は質問の冒頭に一度だけ記述し、以降は省略してください。形式：
-候補者名、IT業界での経験についてお伺いします。
+    if (!candidateInfo.industryType) {
+      return {
+        question: candidateInfo.language === 'en'
+          ? 'Insufficient information about the industry. Which industry have you worked in?'
+          : '業界に関する情報が不足しています。どの業界で働いていましたか？',
+      };
+    }
+
+    const prompt = candidateInfo.language === 'en'
+      ? `You are a recruiter. Based on the following resume, create 5 short sub-questions about the candidate's experience in the "${candidateInfo.industryType}" industry in the following format. Keep the questions concise and in English. Include the candidate's name at the beginning of the first question only, and omit it in subsequent questions. Format:
+${candidateInfo.candidateName}, tell us about your experience in the ${candidateInfo.industryType} industry.
+1. Question 1
+2. Question 2
+3. Question 3
+4. Question 4
+5. Question 5
+Resume: ${candidateInfo.resumeText}`
+      : `あなたは採用担当者です。以下の履歴書に基づき、候補者に対して"${candidateInfo.industryType}"業界での経験について、以下の形式で5つの短いサブ質問を作成してください。質問は日本語で、簡潔にしてください。候補者名は質問の冒頭に一度だけ記述し、以降は省略してください。形式：
+${candidateInfo.candidateName}さん、${candidateInfo.industryType}業界での経験についてお伺いします。
 1. 質問1
 2. 質問2
 3. 質問3
 4. 質問4
 5. 質問5
 履歴書: ${candidateInfo.resumeText}`;
+
     const res = await recruiterAgent.generate(prompt);
     return { question: res?.text?.trim() || '' };
   },
@@ -125,14 +194,31 @@ const askAboutEducation = new Step({
     question: z.string(),
   }),
   execute: async ({ context }) => {
-    const candidateInfo = context?.getStepResult<{ education: string; resumeText: string }>('gatherCandidateInfo') || { education: '', resumeText: '' };
+    const candidateInfo = context?.getStepResult<{
+      education: string;
+      resumeText: string;
+      language: 'en' | 'ja';
+    }>('gatherCandidateInfo') || { education: '', resumeText: '', language: 'ja' };
     console.log('candidateInfo in askAboutEducation:', candidateInfo);
-    if (!candidateInfo.education) return { question: '学歴に関する情報が不足しています。具体的な学歴を教えてください。' };
 
-    const prompt = `あなたは採用担当者です。以下の履歴書に基づき、学歴"${candidateInfo.education}"について、以下の形式で2つの短いサブ質問を作成してください。質問は日本語で、簡潔にしてください。候補者名を含めないでください。形式：
+    if (!candidateInfo.education) {
+      return {
+        question: candidateInfo.language === 'en'
+          ? 'Insufficient information about your education. Please tell us about your educational background.'
+          : '学歴に関する情報が不足しています。具体的な学歴を教えてください。',
+      };
+    }
+
+    const prompt = candidateInfo.language === 'en'
+      ? `You are a recruiter. Based on the following resume, create 2 short sub-questions about the candidate's education "${candidateInfo.education}" in the following format. Keep the questions concise and in English. Do not include the candidate's name. Format:
+1. Question 1
+2. Question 2
+Resume: ${candidateInfo.resumeText}`
+      : `あなたは採用担当者です。以下の履歴書に基づき、学歴"${candidateInfo.education}"について、以下の形式で2つの短いサブ質問を作成してください。質問は日本語で、簡潔にしてください。候補者名を含めないでください。形式：
 1. 質問1
 2. 質問2
 履歴書: ${candidateInfo.resumeText}`;
+
     const res = await recruiterAgent.generate(prompt);
     return { question: res?.text?.trim() || '' };
   },
@@ -145,25 +231,35 @@ const askAboutMotivation = new Step({
     question: z.string(),
   }),
   execute: async ({ context }) => {
-    const candidateInfo = context?.getStepResult<{ resumeText: string }>('gatherCandidateInfo') || { resumeText: '' };
+    const candidateInfo = context?.getStepResult<{
+      resumeText: string;
+      language: 'en' | 'ja';
+    }>('gatherCandidateInfo') || { resumeText: '', language: 'ja' };
     console.log('candidateInfo in askAboutMotivation:', candidateInfo);
-    const prompt = `あなたは採用担当者です。以下の履歴書に基づき、この役職への志望動機と将来のキャリアビジョンについて、以下の形式で2つの短いサブ質問を作成してください。質問は日本語で、簡潔にしてください。候補者名を含めないでください。形式：
+
+    const prompt = candidateInfo.language === 'en'
+      ? `You are a recruiter. Based on the following resume, create 2 short sub-questions about the candidate's motivation for this role and future career vision in the following format. Keep the questions concise and in English. Do not include the candidate's name. Format:
+1. Question 1
+2. Question 2
+Resume: ${candidateInfo.resumeText}`
+      : `あなたは採用担当者です。以下の履歴書に基づき、この役職への志望動機と将来のキャリアビジョンについて、以下の形式で2つの短いサブ質問を作成してください。質問は日本語で、簡潔にしてください。候補者名を含めないでください。形式：
 1. 質問1
 2. 質問2
 履歴書: ${candidateInfo.resumeText}`;
+
     const res = await recruiterAgent.generate(prompt);
-    return { question: res?.text?.trim() || '志望動機について教えてください。' };
+    return { question: res?.text?.trim() || (candidateInfo.language === 'en' ? 'Tell us about your motivation for this role.' : '志望動機について教えてください。') };
   },
 });
 
-// 質問を集めるステップ
+// 質問を集めるステップ（変更なし）
 const collectQuestions = new Step({
   id: 'collectQuestions',
   outputSchema: z.object({
     questions: z.array(z.string()),
   }),
   execute: async ({ context }) => {
-    const candidateInfo = context?.getStepResult<{ candidateName: string }>('gatherCandidateInfo') || { candidateName: '' };
+    const candidateInfo = context?.getStepResult<{ candidateName: string; language: 'en' | 'ja' }>('gatherCandidateInfo') || { candidateName: '', language: 'ja' };
     const questions = [
       context.getStepResult('askAboutIndustry')?.question,
       context.getStepResult('askAboutEducation')?.question,
@@ -173,7 +269,7 @@ const collectQuestions = new Step({
     // 質問を一括して名前を付加
     const formattedQuestions = questions.map((q, index) => {
       if (index === 0 && candidateInfo.candidateName) {
-        return `${candidateInfo.candidateName}さん、${q}`;
+        return `${candidateInfo.candidateName}${candidateInfo.language === 'en' ? ',' : 'さん、'}${q}`;
       }
       return q;
     });
@@ -183,7 +279,7 @@ const collectQuestions = new Step({
   },
 });
 
-// ワークフローの構築
+// ワークフローの構築（変更なし）
 export const candidateWorkflow = new Workflow({
   name: 'candidate-workflow',
   triggerSchema: z.object({
