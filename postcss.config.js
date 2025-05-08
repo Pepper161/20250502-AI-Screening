@@ -1,6 +1,6 @@
 const config = {
   plugins: {
-    tailwindcss: {},
+    '@tailwindcss/postcss': {}, // 修正: tailwindcss → @tailwindcss/postcss
     autoprefixer: {},
   },
 };
